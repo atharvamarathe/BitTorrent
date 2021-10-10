@@ -1,0 +1,12 @@
+{
+  "name": "bittorrent",
+  "version": "1.0.0",
+  "description": "bittorrent client",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "bencode": "^2.0.2"
+  }
+}
