@@ -4,6 +4,36 @@ const bencode = require("bencode");
 const crypto = require("crypto");
 const parse_torrent = require("./torrent-file-parser");
 
+function createHTTPTrackerURL(metaData) {
+  let query = {
+    info_hash: escape(metaData["infoHash"].toString("binary")),
+    peer_id: metaData["peerId"],
+    port: 6882,
+    uploaded: 0,
+    downloaded: 0,
+    left: metaData["length"],
+    compact: 1,
+  };
+  let url = metaData["announce"] + "?";
+  for (const key in query) {
+    url += key + "=" + query[key] + "&";
+  }
+  return url;
+}
+
+function announceHTTP(metaData) {
+  const url = createHTTPTrackerURL(metaData);
+  axios
+    .get(url, { responseType: "arraybuffer", transformResponse: [] })
+    .then((res) => {
+      const data = res.data;
+      info = bencode.decode(data);
+      // info.peers = info.peers.toString("utf-8");
+      console.log(info);
+    })
+    .catch((e) => console.log(e));
+}
+
 function getUDPAnnoucePayload(metaData, connectionId) {
   const payload = Buffer.alloc(98);
   connectionId.copy(payload, 0); // Connection ID
@@ -73,5 +103,5 @@ const url = new URL(metaData["announce"]);
 if (url.protocol == "udp:") {
   announceUDP(url, metaData);
 } else {
-  // announceHTTP(metaData);
+  announceHTTP(metaData);
 }
