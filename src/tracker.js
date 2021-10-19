@@ -2,7 +2,6 @@ const dgram = require("dgram");
 const axios = require("axios").default;
 const bencode = require("bencode");
 const crypto = require("crypto");
-const parse_torrent = require("./torrent-file-parser");
 
 function createHTTPTrackerURL(metaData) {
   let query = {
@@ -21,17 +20,56 @@ function createHTTPTrackerURL(metaData) {
   return url;
 }
 
+function getConnectionID(response) {
+  return response.slice(8);
+}
+
+function getPeersListCompact(resp) {
+  let peersList = [];
+  for (let i = 0; i < resp.length; i += 6) {
+    peersList.push({
+      ip: resp.slice(i, i + 4).join("."),
+      port: resp.readUInt16BE(i + 4),
+    });
+  }
+  return peersList;
+}
+
+function parseHTTPAnnounceResp(resp) {
+  const responseInfo = bencode.decode(resp);
+  return {
+    protocol: "http",
+    interval: responseInfo.interval,
+    leechers: responseInfo.incomplete,
+    seeders: responseInfo.complete,
+    peerList: getPeersListCompact(responseInfo.peers),
+  };
+}
+
 function announceHTTP(metaData) {
-  const url = createHTTPTrackerURL(metaData);
-  axios
-    .get(url, { responseType: "arraybuffer", transformResponse: [] })
-    .then((res) => {
-      const data = res.data;
-      info = bencode.decode(data);
-      // info.peers = info.peers.toString("utf-8");
-      console.log(info);
-    })
-    .catch((e) => console.log(e));
+  return new Promise((resolve, reject) => {
+    const url = createHTTPTrackerURL(metaData);
+    axios
+      .get(url, { responseType: "arraybuffer", transformResponse: [] })
+      .then((res) => {
+        const info = parseHTTPAnnounceResp(res.data);
+        resolve(info);
+      })
+      .catch((e) => {
+        console.log(e);
+        reject(e);
+      });
+  });
+}
+function parseUDPAnnounceResp(resp) {
+  return {
+    protocol: "udp",
+    action: resp.readUInt32BE(0),
+    transactionId: resp.readUInt32BE(4),
+    leechers: resp.readUInt32BE(8),
+    seeders: resp.readUInt32BE(12),
+    peerList: getPeersListCompact(resp.slice(20)),
+  };
 }
 
 function getUDPAnnoucePayload(metaData, connectionId) {
@@ -61,47 +99,50 @@ function getUDPAnnoucePayload(metaData, connectionId) {
   payload.writeInt32BE(-1, 92);
   // port
   payload.writeUInt16BE(6884, 96);
-  console.log(payload);
   return payload;
 }
 
-function announceUDP(url, metaData) {
-  const udpSocket = dgram.createSocket("udp4");
+const getUDPConnectPayload = () => {
   const payload = Buffer.alloc(16);
   payload.writeUInt32BE(0x417, 0);
   payload.writeUInt32BE(0x27101980, 4);
   payload.writeUInt32BE(0, 8);
   crypto.randomBytes(4).copy(payload, 12);
+  return payload;
+};
 
-  console.log(url.hostname, url.port);
-
-  udpSocket.send(payload, url.port, url.hostname);
-  udpSocket.on("error", (err) => {
-    console.log(err);
-  });
-  udpSocket.on("message", (msg) => {
-    console.log("Message is ", msg);
-    // udpSocket.close();
-    annoucePayload = getUDPAnnoucePayload(metaData, getConnectionID(msg));
-    udpSocket.send(annoucePayload, url.port, url.hostname, () => {});
-    udpSocket.on("error", (err) => {
+function announceUDP(url, metaData) {
+  return new Promise((resolve, reject) => {
+    const socket = dgram.createSocket("udp4");
+    const payload = getUDPConnectPayload();
+    socket.send(payload, url.port, url.hostname);
+    socket.on("error", (err) => {
       console.log(err);
+      reject(err);
     });
-    udpSocket.on("message", (msg1) => {
-      console.log("Response : ", msg1);
-      udpSocket.close();
+    socket.on("message", (msg) => {
+      annoucePayload = getUDPAnnoucePayload(metaData, getConnectionID(msg));
+      socket.send(annoucePayload, url.port, url.hostname, () => {});
+      socket.on("error", (err) => {
+        console.log(err);
+        reject(err);
+      });
+      socket.on("message", (msg1) => {
+        socket.close();
+        const resp = parseUDPAnnounceResp(msg1);
+        resolve(resp);
+      });
     });
   });
 }
 
-let filename;
-// filename = "./demoTorrentFiles/ubuntu-20.04.3-live-server-amd64.iso.torrent";
-// filename = "./demoTorrentFiles/big-buck-bunny.torrent";
+const announce = (metaData) => {
+  const url = new URL(metaData["announce"]);
+  if (url.protocol == "udp:") {
+    return announceUDP(url, metaData);
+  } else {
+    return announceHTTP(metaData);
+  }
+};
 
-const metaData = parse_torrent(filename);
-const url = new URL(metaData["announce"]);
-if (url.protocol == "udp:") {
-  announceUDP(url, metaData);
-} else {
-  announceHTTP(metaData);
-}
+module.exports = announce;
