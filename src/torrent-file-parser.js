@@ -20,11 +20,6 @@ getInfoHash = (rawInfo) => {
   return shasum.digest();
 };
 
-peerID = () => {
-  let peerId = "-AMVK01-" + Math.random().toString().slice(2, 14);
-  return peerId;
-};
-
 function getMetaData(torrentData) {
   const announce = torrentData.announce.toString("utf-8");
   let announceList = torrentData["announce-list"];
@@ -43,7 +38,6 @@ function getMetaData(torrentData) {
       files[i].path = files[i].path.map((buf) => buf.toString("utf-8"));
     }
   }
-  console.log(files);
   const metadata = {
     announce: announce,
     announceList: announceList,
@@ -52,7 +46,6 @@ function getMetaData(torrentData) {
     pieces: info.pieces,
     info: info,
     infoHash: getInfoHash(info),
-    peerId: peerID(),
     files: files,
     length: files ? totalLength : info.length,
     encoding: torrentData.encoding,
