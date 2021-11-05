@@ -1,7 +1,6 @@
 /**
  * Original source: https://github.com/chrisakroyd/bit-vec/blob/main/src/index.js
- * Modifications: conversions to/from buffer, get all set bit indices and
- * other changes to meet project requirements)
+ * Modifications: conversions to/from buffer, and other changes to meet project requirements)
  */
 
 class BitVector {
@@ -9,11 +8,11 @@ class BitVector {
    * BitVector constructor.
    *
    * @constructor
-   * @param {Number} size -> Size of the array in bits.
+   * @param {Number} size -> Size of the buffer in bits.
    */
   constructor(size) {
-    this.array = new Uint8Array(Math.ceil(size / 8));
-    this.bitsPerElement = this.array.BYTES_PER_ELEMENT * 8;
+    this.buf = new Buffer.alloc(Math.ceil(size / 8));
+    this.bitsPerElem = this.buf.BYTES_PER_ELEMENT * 8;
   }
 
   /**
@@ -21,19 +20,19 @@ class BitVector {
    *  therefore these are computed on the fly via getters.
    */
   get bits() {
-    return this.bitsPerElement * this.array.length;
+    return this.bitsPerElem * this.buf.length;
   }
 
   get length() {
-    return this.array.length;
+    return this.buf.length;
   }
 
   get bitVector() {
-    return this.array;
+    return this.buf;
   }
 
-  set bitVector(bitArray) {
-    this.array = bitArray;
+  set bitVector(bitbuffer) {
+    this.buf = bitbuffer;
   }
 
   /**
@@ -43,7 +42,7 @@ class BitVector {
    * @throws {RangeError} Throws range error if index is out of range.
    */
   rangeCheck(index) {
-    if (!(index < this.bits) || index < 0) {
+    if (index >= this.bits || index < 0) {
       throw new RangeError(
         `Given index ${index} out of range of bit vector length ${this.bits}`
       );
@@ -59,10 +58,11 @@ class BitVector {
    */
   get(index) {
     this.rangeCheck(index);
-    const byteIndex = Math.floor(index / this.bitsPerElement);
-    const bitIndex = index % this.bitsPerElement;
+    const byteIndex = Math.floor(index / this.bitsPerElem);
+    const bitIndex = index % this.bitsPerElem;
 
-    return (this.array[byteIndex] & (1 << bitIndex)) > 0 ? 1 : 0;
+    let v = this.buf[byteIndex] & (1 << (this.bitsPerElem - bitIndex - 1));
+    return v > 0 ? 1 : 0;
   }
 
   /**
@@ -75,15 +75,14 @@ class BitVector {
    */
   set(index, value = 1) {
     this.rangeCheck(index);
-    const byteIndex = Math.floor(index / this.bitsPerElement);
-    const bitIndex = index % this.bitsPerElement;
+    const byteIndex = Math.floor(index / this.bitsPerElem);
+    const bitIndex = this.bitsPerElem - 1 - (index % this.bitsPerElem);
 
     if (value) {
-      this.array[byteIndex] |= 1 << bitIndex;
+      this.buf[byteIndex] |= 1 << bitIndex;
     } else {
-      this.array[byteIndex] &= ~(1 << bitIndex);
+      this.buf[byteIndex] &= ~(1 << bitIndex);
     }
-
     return this;
   }
 
@@ -107,9 +106,9 @@ class BitVector {
    */
   flip(index) {
     this.rangeCheck(index);
-    const byteIndex = Math.floor(index / this.bitsPerElement);
-    const bitIndex = index % this.bitsPerElement;
-    this.array[byteIndex] ^= 1 << bitIndex;
+    const byteIndex = Math.floor(index / this.bitsPerElem);
+    const bitIndex = this.bitsPerElem - 1 - (index % this.bitsPerElem);
+    this.buf[byteIndex] ^= 1 << bitIndex;
     return this;
   }
 
@@ -132,8 +131,8 @@ class BitVector {
    */
   count() {
     let c = 0;
-    for (let i = 0; i < this.array.length; i += 1) {
-      c += countBits(this.array[i]);
+    for (let i = 0; i < this.buf.length; i += 1) {
+      c += countBits(this.buf[i]);
     }
     return c;
   }
@@ -170,22 +169,22 @@ class BitVector {
   /**
    * `bitVec.shortLong(bitVec)`
    *  Useful function allowing for the comparison of two differently sized BitVector's.
-   *  Simply returns the short and long arrays.
+   *  Simply returns the short and long buffers.
    *
    * @param {BitVector} bitVec -> BitVector, instance of BitVector class.
    * @return {Object} Returns object with two keys of type `BitVector`,
    *                  short = shorter bit vector, long = longer bit vector.
    */
-  shortLong(bitVec) {
+  shortLong(that) {
     let short;
     let long;
 
-    if (bitVec.length < this.length) {
-      short = bitVec.array;
-      long = this.array;
+    if (that.length < this.length) {
+      short = that.buffer;
+      long = this.buf;
     } else {
-      short = this.array;
-      long = bitVec.array;
+      short = this.buf;
+      long = that.buffer;
     }
 
     return { short, long };
@@ -200,22 +199,22 @@ class BitVector {
    * @return {BitVector} Returns new `BitVector` object with the result of the operation.
    */
   or(bitVec) {
-    // Get short and long arrays, assign correct variables -> for ops between two diff sized arrays.
+    // Get short and long buffers, assign correct variables -> for ops between two diff sized buffers.
     const { short, long } = this.shortLong(bitVec);
-    const array = new Uint8Array(long.length);
+    const buffer = new Buffer.alloc(long.length);
 
-    // Perform operation over shorter array.
+    // Perform operation over shorter buffer.
     for (let i = 0; i < short.length; i += 1) {
-      array[i] = short[i] | long[i];
+      buffer[i] = short[i] | long[i];
     }
 
-    // Fill in the remaining unchanged numbers from the longer array.
+    // Fill in the remaining unchanged numbers from the longer buffer.
     for (let j = short.length; j < long.length; j += 1) {
-      array[j] = long[j];
+      buffer[j] = long[j];
     }
 
     // Return a new BitVector object.
-    return BitVector.fromArray(array);
+    return BitVector.fromBuffer(buffer);
   }
 
   /**
@@ -227,22 +226,22 @@ class BitVector {
    * @return {BitVector} Returns new `BitVector` object with the result of the operation.
    */
   xor(bitVec) {
-    // Get short and long arrays, assign correct variables -> for ops between two diff sized arrays.
+    // Get short and long buffers, assign correct variables -> for ops between two diff sized buffers.
     const { short, long } = this.shortLong(bitVec);
-    const array = new Uint8Array(long.length);
+    const buffer = new Buffer.alloc(long.length);
 
-    // Perform operation over shorter array.
+    // Perform operation over shorter buffer.
     for (let i = 0; i < short.length; i += 1) {
-      array[i] = short[i] ^ long[i];
+      buffer[i] = short[i] ^ long[i];
     }
 
-    // Fill in the remaining numbers from the longer array.
+    // Fill in the remaining numbers from the longer buffer.
     for (let j = short.length; j < long.length; j += 1) {
-      array[j] = 0 ^ long[j];
+      buffer[j] = 0 ^ long[j];
     }
 
     // Return a new BitVector object.
-    return BitVector.fromArray(array);
+    return BitVector.fromBuffer(buffer);
   }
 
   /**
@@ -254,22 +253,22 @@ class BitVector {
    * @return {BitVector} Returns new `BitVector` object with the result of the operation.
    */
   and(bitVec) {
-    // Get short and long arrays, assign correct variables -> for ops between two diff sized arrays.
+    // Get short and long buffers, assign correct variables -> for ops between two diff sized buffers.
     const { short, long } = this.shortLong(bitVec);
-    const array = new Uint8Array(long.length);
+    const buffer = new Buffer.alloc(long.length);
 
-    // Perform operation over shorter array.
+    // Perform operation over shorter buffer.
     for (let i = 0; i < short.length; i += 1) {
-      array[i] = short[i] & long[i];
+      buffer[i] = short[i] & long[i];
     }
 
-    // Fill in the remaining unchanged numbers from the longer array.
+    // Fill in the remaining unchanged numbers from the longer buffer.
     for (let j = short.length; j < long.length; j += 1) {
-      array[j] = long[j];
+      buffer[j] = long[j];
     }
 
     // Return a new BitVector object.
-    return BitVector.fromArray(array);
+    return BitVector.fromBuffer(buffer);
   }
 
   /**
@@ -288,8 +287,8 @@ class BitVector {
       }
     }
 
-    // If the longer array is all 0 then they are equal, if not then they are not.
-    // equiv to padding shorter bit array to larger array length and comparing.
+    // If the longer buffer is all 0 then they are equal, if not then they are not.
+    // equiv to padding shorter bit buffer to larger buffer length and comparing.
     // Allows comparisons along vecs of different length.
     for (let j = short.length; j < long.length; j += 1) {
       if (long[j] !== 0) {
@@ -320,13 +319,13 @@ class BitVector {
    * @return {BitVector} Returns new `BitVector` object with the result of the operation.
    */
   not() {
-    const array = new Uint8Array(this.array.length);
+    const buffer = new Buffer.alloc(this.buf.length);
 
-    for (let i = 0; i < this.array.length; i += 1) {
-      array[i] = ~this.array[i];
+    for (let i = 0; i < this.buf.length; i += 1) {
+      buffer[i] = ~this.buf[i];
     }
 
-    return BitVector.fromArray(array);
+    return BitVector.fromBuffer(buffer);
   }
 
   /**
@@ -337,7 +336,7 @@ class BitVector {
    * @return {BitVector} Returns new `BitVector` object with the result of the operation.
    */
   invert() {
-    this.array = this.not().array;
+    this.buf = this.not().buffer;
     return this;
   }
 
@@ -350,7 +349,7 @@ class BitVector {
    * @return {BitVector} Returns `this` for chaining with the bits set.
    */
   orEqual(bitVec) {
-    this.array = this.or(bitVec).array;
+    this.buf = this.or(bitVec).buffer;
     return this;
   }
 
@@ -363,7 +362,7 @@ class BitVector {
    * @return {BitVector} Returns `this` for chaining with the bits set.
    */
   xorEqual(bitVec) {
-    this.array = this.xor(bitVec).array;
+    this.buf = this.xor(bitVec).buffer;
     return this;
   }
 
@@ -376,7 +375,7 @@ class BitVector {
    * @return {BitVector} Returns `this` for chaining with the bits set.
    */
   andEqual(bitVec) {
-    this.array = this.and(bitVec).array;
+    this.buf = this.and(bitVec).buffer;
     return this;
   }
 
@@ -388,7 +387,7 @@ class BitVector {
    * @return {BitVector} Returns `this` for chaining with the bits set.
    */
   notEqual() {
-    this.array = this.not().array;
+    this.buf = this.not().buffer;
     return this;
   }
 
@@ -399,31 +398,27 @@ class BitVector {
    * @return {Boolean} Returns Boolean `true` if the bit vector has no set bits, `false` otherwise.
    */
   isEmpty() {
-    for (let i = 0; i < this.array.length; i += 1) {
-      if (this.array[i] !== 0) {
+    for (let i = 0; i < this.buf.length; i += 1) {
+      if (this.buf[i] !== 0) {
         return false;
       }
     }
     return true;
   }
 
-  toArray() {
-    return this.array;
-  }
-
   toBuffer() {
-    return Buffer.from(this.array.buffer);
+    return this.buf;
   }
 
-  static fromArray(bitVec) {
-    const newBitVec = new BitVector(0);
-    newBitVec.bitVector = bitVec;
-    return newBitVec;
+  print() {
+    console.log(
+      [...this.buf].map((s) => s.toString(2).padStart(8, "0")).join(" ")
+    );
   }
 
   static fromBuffer(buf) {
     const newBitVec = new BitVector(0);
-    newBitVec.bitVector = new Uint8Array(buf.buffer);
+    newBitVec.buffer = buf;
     return newBitVec;
   }
 }
@@ -436,3 +431,17 @@ const countBits = (count) => {
 };
 
 module.exports = BitVector;
+
+// const v = new BitVector(15);
+// const f = new BitVector(15);
+
+// v.set(5);
+// f.set(6);
+// v.print();
+// f.print();
+// v.setRange(8, 12);
+// v.print();
+// v.clearRange(6, 9);
+// v.print();
+// v.clear(11);
+// v.print();
