@@ -4,10 +4,13 @@ const net = require("net");
 const messages = require("./messages");
 const msgId = messages.msgId;
 const crypto = require("crypto");
+const BitVector = require("./util/bitvector");
+const Piece = require("./piece");
 
 var log4js = require("log4js");
 var logger = log4js.getLogger();
-logger.level = "debug";
+logger.level = "warn";
+// logger.level = "debug";
 
 class Peer {
   constructor(peerIp, peerPort, torrent, socket = null) {
@@ -22,7 +25,7 @@ class Peer {
       amInterested: false,
     };
     this.torrent = torrent;
-    this.bitField = 0;
+    this.bitField = new BitVector(this.torrent.pieces.length);
     this.piecesDownloaded = [];
     this.handshakeDone = false;
     this.msgProcessing = false;
@@ -30,7 +33,6 @@ class Peer {
     this.uploadRate = 0;
     this.pieceBuffer = [];
     this.blockQueue = [];
-    this.currBlock = -1;
     this.uniqueId = this.ip + ":" + this.port;
   }
 
@@ -50,7 +52,6 @@ class Peer {
         this.socket.write(hs);
       });
     }
-    let self = this;
     this.socket.on("error", (err) => this.onError(err));
     this.socket.on("data", (data) => this.onData(data));
     this.socket.on("end", () => this.onEnd());
@@ -65,7 +66,12 @@ class Peer {
   };
 
   handleBitfield = (m) => {
-    this.bitField = m.payload;
+    this.bitField = BitVector.fromBuffer(m.payload);
+
+    for (let i = 0; i < this.torrent.numPieces; i++) {
+      this.torrent.pieces[i].count += this.bitField.get(i);
+    }
+
     if (this.state.amInterested == false) {
       const interested = messages.getInterestedMsg();
       logger.info(
@@ -84,19 +90,7 @@ class Peer {
       logger.info("Requesting block to ", this.uniqueId, " : ", requestMsg);
       this.socket.write(requestMsg);
     } else {
-      logger.warn("Complete Piece Downloaded ");
-      this.savePiece();
-      this.pieceBuffer = [];
       // logger.warn(this.torrent.pieces);
-    }
-  };
-
-  verifyPiece = (Piece) => {
-    let shasum = crypto.createHash("sha1").update(Piece.data).digest();
-    if (this.torrent.metadata.pieces[Piece.index] == shasum) {
-      return true;
-    } else {
-      return false;
     }
   };
 
@@ -120,28 +114,50 @@ class Peer {
   };
 
   buildBlockRequestQueue = () => {
-    let offset = 0;
-    for (
-      let i = 0;
-      i < this.torrent.metadata.pieceLength / Math.pow(2, 14);
-      i++
-    ) {
-      const requestPacket = {
-        index: 3,
-        begin: offset,
-        length: Math.pow(2, 14),
-      };
-      offset += Math.pow(2, 14);
-      this.blockQueue.push(requestPacket);
+    const pieceLen = this.torrent.metadata.pieceLength;
+    const pieceIndex = this.getRarestPieceIndex();
+    if (pieceIndex != -1) {
+      this.torrent.pieces[pieceIndex].state = Piece.states.ACTIVE;
+      let offset = 0;
+      for (let i = 0; i < pieceLen / Piece.BlockLength; i++) {
+        const requestPacket = {
+          index: pieceIndex,
+          begin: offset,
+          length: Piece.BlockLength,
+        };
+        offset += Piece.BlockLength;
+        this.blockQueue.push(requestPacket);
+      }
+      if (pieceLen % Piece.BlockLength) {
+        const requestPacket = {
+          index: pieceIndex,
+          begin: offset,
+          length: pieceLen % Piece.BlockLength,
+        };
+        this.blockQueue.push(requestPacket);
+      }
+      return;
+    } else {
+      //TODO
+      return;
     }
-    if (this.torrent.metadata.pieceLength % Math.pow(2, 14)) {
-      const requestPacket = {
-        index: idx,
-        begin: offset,
-        length: this.torrent.metadata.pieceLength % Math.pow(2, 14),
-      };
-      this.blockQueue.push(requestPacket);
+  };
+
+  getRarestPieceIndex = () => {
+    let rarity = 100000; // large number
+    let pieceIndex = -1;
+    let ps = this.torrent.pieces;
+    for (let i = 0; i < ps.length; i++) {
+      if (
+        this.bitField.test(i) &&
+        ps[i].count < rarity &&
+        ps[i].state === Piece.states.PENDING
+      ) {
+        rarity = ps[i].count;
+        pieceIndex = i;
+      }
     }
+    return pieceIndex;
   };
 
   handleMsg = () => {
@@ -176,9 +192,10 @@ class Peer {
 
       case msgId.HAVE:
         const pieceIndex = msg.payload.readUInt32BE(0);
-
-        // update the bitfield
+        this.bitField.set(pieceIndex);
+        this.torrent.pieces[pieceIndex].count += 1;
         break;
+
       case msgId.BITFIELD:
         this.handleBitfield(msg);
         break;
@@ -188,7 +205,12 @@ class Peer {
         break;
 
       case msgId.PIECE:
-        this.pieceBuffer.push(msg.payload);
+        const { index, begin, block } = msg.payload;
+        const piece = this.torrent.pieces[index];
+        const pieceComplete = piece.saveBlock(begin, block);
+        if (pieceComplete) {
+          this.buildBlockRequestQueue();
+        }
         this.requestBlock();
         break;
 
@@ -236,6 +258,11 @@ class Peer {
   disconnect = (msg, reconnectionTimeOut) => {
     logger.info(`peer disconnected ${this.uniqueId} with message ${msg}`);
     this.disconnected = true;
+
+    for (let i = 0; i < this.torrent.numPieces; i++) {
+      this.torrent.pieces[i].count -= this.bitField.get(i);
+    }
+
     if (this.socket) {
       this.socket.destroy();
       this.socket = null;
