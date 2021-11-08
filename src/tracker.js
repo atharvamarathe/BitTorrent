@@ -77,7 +77,7 @@ class HttpHandler {
           resolve(info);
         })
         .catch((e) => {
-          console.log(e);
+          logger.error(e);
           reject(e);
         });
     });
@@ -134,7 +134,7 @@ class UdpHandler {
       const { port, hostname } = this.tracker.url;
       const socket = dgram.createSocket("udp4");
       socket.on("error", (err) => {
-        console.log(err);
+        logger.error(err);
         return reject(err);
       });
       const payload = this.getConnectPayload();
@@ -231,11 +231,21 @@ class UdpHandler {
 
 const getPeersListCompact = (resp) => {
   let peersList = [];
-  for (let i = 0; i < resp.length; i += 6) {
-    peersList.push({
-      ip: resp.slice(i, i + 4).join("."),
-      port: resp.readUInt16BE(i + 4),
-    });
+  console.log(resp);
+  if (Buffer.isBuffer(resp)) {
+    for (let i = 0; i < resp.length; i += 6) {
+      peersList.push({
+        ip: resp.slice(i, i + 4).join("."),
+        port: resp.readUInt16BE(i + 4),
+      });
+    }
+  } else {
+    for (let i = 0; i < resp.length; i++) {
+      peersList.push({
+        ip: resp[i].ip,
+        port: resp[i].port,
+      });
+    }
   }
   return peersList;
 };

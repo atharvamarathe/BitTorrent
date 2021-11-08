@@ -10,7 +10,11 @@ This code may be freely distributed under the MIT License
 =================================
 */
 
-function PriorityQueue(scoreFunction, idFunction, valueProp) {
+function PriorityQueue(
+  scoreFunction = (ele) => ele.count,
+  idFunction = (ele) => ele.index,
+  valueProp = "count"
+) {
   this.content = [];
   this.scoreFunction = scoreFunction;
   this.idFunction = idFunction;
@@ -112,6 +116,10 @@ PriorityQueue.prototype = {
     var n = this.map[id];
     this.content[n][this.valueProp] = value;
     this.sinkDown(n);
+  },
+
+  contains: function (id) {
+    return this.map.hasOwnProperty(id);
   },
 };
 

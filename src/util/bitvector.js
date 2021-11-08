@@ -418,7 +418,7 @@ class BitVector {
 
   static fromBuffer(buf) {
     const newBitVec = new BitVector(0);
-    newBitVec.buffer = buf;
+    newBitVec.buf = buf;
     return newBitVec;
   }
 }
