@@ -14,7 +14,7 @@ class Piece {
 
   static BlockLength = Math.pow(2, 14);
 
-  constructor(index, len, hash) {
+  constructor(index, len, hash, files) {
     this.hash = hash;
     this.index = index;
     this.length = len;
@@ -23,12 +23,25 @@ class Piece {
     this.numBlocks = Math.ceil(this.length / Piece.BlockLength);
     this.completedBlocks = new BitVector(this.numBlocks);
     this.data = Buffer.alloc(len);
+    this.files = files;
   }
 
   saveBlock = (begin, block) => {
     block.copy(this.data, begin);
     this.completedBlocks.set(begin / Piece.BlockLength);
-    return this.isComplete();
+    if (this.isComplete()) {
+      this.writePiece();
+      return true;
+    } else return false;
+  };
+
+  writePiece = () => {
+    for (let i = 0; i < this.files.length; i++) {
+      this.files[i].write(this.data, this.index * this.length, (err) => {
+        if (err) logger.error(err);
+        this.data = null;
+      });
+    }
   };
 
   isComplete = () => {
