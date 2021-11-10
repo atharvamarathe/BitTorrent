@@ -42,6 +42,7 @@ class Peer {
         host: this.ip,
         port: this.port,
       });
+
       // do handshake after connecting
       this.socket.on("connect", () => {
         let hs = messages.buildHandshakePacket(this.torrent.metadata);
@@ -90,13 +91,41 @@ class Peer {
   };
 
   buildBlockRequestQueue = () => {
-    let pieceIndex = this.getRarestPieceIndex();
+    let pieceIndex = -1;
+    if (this.torrent.mode === "endgame") {
+      let missing = [];
+      for (const m in this.torrent.missingPieces) {
+        if (this.bitField.test(m)) missing.push(m);
+      }
+      if (missing.length > 0) {
+        const r = Math.floor(Math.random() * missing.length);
+        pieceIndex = missing[r];
+      }
+    } else {
+      pieceIndex = this.getRarestPieceIndex();
+    }
     if (pieceIndex != -1) {
-      this.torrent.pieces[pieceIndex].state = Piece.states.ACTIVE;
       const pieceLen = this.torrent.pieces[pieceIndex].length;
-      this.blockQueue = Piece.getBlocks(pieceIndex, pieceLen);
+      this.torrent.pieces[pieceIndex].state = Piece.states.ACTIVE;
+      for (let i = 0; i < Math.floor(pieceLen / Piece.BlockLength); i++) {
+        const requestPacket = {
+          index: pieceIndex,
+          begin: Piece.BlockLength * i,
+          length: Piece.BlockLength,
+        };
+        this.blockQueue.push(requestPacket);
+      }
+      if (pieceLen % Piece.BlockLength) {
+        const requestPacket = {
+          index: pieceIndex,
+          begin: pieceLen - (pieceLen % Piece.BlockLength),
+          length: pieceLen % Piece.BlockLength,
+        };
+        this.blockQueue.push(requestPacket);
+      }
       return;
     } else {
+      //TODO
       return;
     }
   };
@@ -110,6 +139,7 @@ class Peer {
         this.bitField.test(i) &&
         ps[i].count < rarity &&
         ps[i].state === Piece.states.PENDING
+        // ps[i].state !== Piece.states.COMPLETE
       ) {
         rarity = ps[i].count;
         pieceIndex = i;
@@ -166,20 +196,18 @@ class Peer {
 
       case msgId.PIECE:
         const { index, begin, block } = msg.payload;
-        console.log("got block from ", this.uniqueId, index, begin);
         const piece = this.torrent.pieces[index];
         const pieceComplete = piece.saveBlock(begin, block);
         if (pieceComplete) {
+          // if ENDGAME mode, cancel request for this piece from all peers
+          if (this.torrent.mode === "endgame") {
+            delete this.torrent.missingPieces[index];
+            for (const p of this.torrent.peers) {
+            }
+          }
           this.torrent.isComplete();
         }
-        // if ENDGAME state, cancel request for this piece from all peers
-        if (this.torrent.state === "endgame") {
-          for (const p of this.torrent.peers) {
-            p.socket.write(
-              messages.getCancelMsg({ index, begin, length: block.length })
-            );
-          }
-        } else this.requestBlock();
+        this.requestBlock();
         break;
 
       case msgId.CANCEL:

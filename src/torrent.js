@@ -4,21 +4,18 @@ const path = require("path");
 const Peer = require("./peer");
 const Piece = require("./piece");
 const File = require("./file");
-const messages = require("./messages");
 const Tracker = require("./tracker");
-const { shuffleArray } = require("./util/utilities");
 var log4js = require("log4js");
 var logger = log4js.getLogger();
 // logger.level = "debug";
 logger.level = "warn";
 
 class Torrent {
-  static states = {
+  static modes = {
     DEFAULT: "default",
     ENDGAME: "endgame",
     COMPLETED: "completed",
   };
-
   constructor(torrentFile, options = {}) {
     this.metadata = parse_torrent(torrentFile);
     this.clientId =
@@ -32,11 +29,13 @@ class Torrent {
     this.downloadLimit = options.downloadLimit;
     this.maxConnections = options.maxConnections || 30;
     this.peers = [];
-    this.state = Torrent.states.DEFAULT;
+    this.mode = Torrent.modes.DEFAULT;
     this.files = [];
     this.uploaded = 0;
     this.downloaded = 0;
     this.pieces = [];
+    // available only in EndGame mode
+    this.missingPieces = {};
   }
 
   isComplete = () => {
@@ -50,26 +49,18 @@ class Torrent {
       console.log("completed downloading torrent");
       this.shutdown();
     }
-    // start ENDGAME state if we have requested all pieces except one
+    // start ENDGAME mode if we have requested all pieces except one
     if (
       numDone + numActive >= this.pieces.length - 1 &&
-      this.state !== Torrent.states.ENDGAME
+      this.mode !== Torrent.modes.ENDGAME
     ) {
-      console.warn("starting ENDGAME");
-      this.state = Torrent.states.ENDGAME;
+      console.warn("endgame started");
+      this.mode = Torrent.modes.ENDGAME;
       const missing = this.pieces.filter(
         (p) => p.state !== Piece.states.COMPLETE
       );
-      console.log(missing.map((m) => m.index));
-      let blockRequests = [];
       for (let m of missing) {
-        blockRequests.push(...Piece.getBlocks(m.index, m.length));
-      }
-      for (let p of this.peers) {
-        shuffleArray(blockRequests);
-        for (let b of blockRequests) {
-          if (p.socket) p.socket.write(messages.getRequestMsg(b));
-        }
+        this.missingPieces[m.index] = m;
       }
     }
     console.log("progress: ", numDone, "/", this.pieces.length);
@@ -159,7 +150,7 @@ class Torrent {
     if (this.metadata.announce) {
       tracker = new Tracker(this.metadata.announce, this);
     } else {
-      // console.log(this.metadata.announceList[0]);
+      console.log(this.metadata.announceList[0]);
       tracker = new Tracker(this.metadata.announceList[0], this);
       // console.log(tracker);
     }
