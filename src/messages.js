@@ -1,8 +1,16 @@
-const parse_torrent = require("./torrent-file-parser");
-// const net = require("net");
-// let filename;
-// filename = "./demoTorrentFiles/ubuntu-20.04.3-live-server-amd64.iso.torrent";
-// filename = "./demoTorrentFiles/big-buck-bunny.torrent";
+const msgId = {
+  CHOKE: 0,
+  UNCHOKE: 1,
+  INTERESTED: 2,
+  UNINTERESTED: 3,
+  HAVE: 4,
+  BITFIELD: 5,
+  REQUEST: 6,
+  PIECE: 7,
+  CANCEL: 8,
+  PORT: 9,
+  KEEPALIVE: -1,
+};
 
 const buildHandshakePacket = (metaData) => {
   const pstr = "BitTorrent protocol";
