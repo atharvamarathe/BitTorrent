@@ -9,13 +9,12 @@ const ERROR = "error";
 const STOPPED = "stopped";
 const WAITING = "waiting";
 
-const events = {
-  STARTED: "started",
-  COMPLETED: "completed",
-  STOPPED: "stopped",
-};
-
 class Tracker {
+  static events = {
+    STARTED: "started",
+    COMPLETED: "completed",
+    STOPPED: "stopped",
+  };
   constructor(url, torrent) {
     this.url = new URL(url);
     this.torrent = torrent;
@@ -28,37 +27,36 @@ class Tracker {
     }
   }
 
-  announce(event) {
-    return new Promise((resolve, reject) => {
-      this.state = CONNECTING;
-      this.handler
-        .connect(event)
-        .then((data) => {
-          this.state = WAITING;
-          if (event === events.STARTED) {
-            if (this.intervalId) {
-              clearInterval(this.intervalId);
-            }
-            if (data.interval) {
-              this.intervalId = setInterval(function () {
-                this.announce();
-              }, 10000);
-            }
-          } else if (event === events.STOPPED) {
+  announce(event, cb) {
+    console.log("announcing");
+    this.state = CONNECTING;
+    this.handler
+      .connect(event)
+      .then((data) => {
+        this.state = WAITING;
+        if (event === Tracker.events.STARTED) {
+          if (this.intervalId) {
             clearInterval(this.intervalId);
-            this.intervalId = null;
-            this.state = STOPPED;
           }
-          resolve(data);
-        })
-        .catch((err) => {
-          this.state = ERROR;
-          if (event === events.STARTED) {
-            setTimeout(() => this.announce(event), 10000);
+          if (data.interval) {
+            this.intervalId = setInterval(() => {
+              this.announce(event, cb);
+            }, data.interval * 1000);
           }
-          reject(err);
-        });
-    });
+        } else if (event === Tracker.events.STOPPED) {
+          clearInterval(this.intervalId);
+          this.intervalId = null;
+          this.state = STOPPED;
+        }
+        cb(null, data);
+      })
+      .catch((err) => {
+        this.state = ERROR;
+        if (event === Tracker.events.STARTED) {
+          setTimeout(() => this.announce(event, cb), 10000);
+        }
+        cb(err);
+      });
   }
 }
 
@@ -110,7 +108,7 @@ class HttpHandler {
       interval: responseInfo.interval,
       leechers: responseInfo.incomplete,
       seeders: responseInfo.complete,
-      peerList: getPeersListCompact(responseInfo.peers),
+      peerList: getPeersList(responseInfo.peers),
     };
   };
 }
@@ -191,9 +189,9 @@ class UdpHandler {
 
     //event (0: none; 1: completed; 2: started; 3: stopped)
     let e = 0;
-    if (event === events.COMPLETED) e = 1;
-    else if (event === events.STARTED) e = 2;
-    else if (event === events.STOPPED) e = 3;
+    if (event === Tracker.events.COMPLETED) e = 1;
+    else if (event === Tracker.events.STARTED) e = 2;
+    else if (event === Tracker.events.STOPPED) e = 3;
     payload.writeUInt32BE(e, 80);
 
     // ip
@@ -224,15 +222,15 @@ class UdpHandler {
       interval: resp.readUInt32BE(8),
       leechers: resp.readUInt32BE(12),
       seeders: resp.readUInt32BE(16),
-      peerList: getPeersListCompact(resp.slice(20)),
+      peerList: getPeersList(resp.slice(20)),
     };
   };
 }
 
-const getPeersListCompact = (resp) => {
+const getPeersList = (resp) => {
   let peersList = [];
-  console.log(resp);
   if (Buffer.isBuffer(resp)) {
+    //compact
     for (let i = 0; i < resp.length; i += 6) {
       peersList.push({
         ip: resp.slice(i, i + 4).join("."),
@@ -240,9 +238,10 @@ const getPeersListCompact = (resp) => {
       });
     }
   } else {
+    // non compact
     for (let i = 0; i < resp.length; i++) {
       peersList.push({
-        ip: resp[i].ip,
+        ip: resp[i].ip.toString(),
         port: resp[i].port,
       });
     }
