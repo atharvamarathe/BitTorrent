@@ -66,7 +66,9 @@ class Peer {
   };
 
   handleBitfield = (m) => {
-    this.bitField = BitVector.fromBuffer(m.payload);
+    this.bitField = BitVector.fromBuffer(
+      m.payload.slice(0, Math.ceil(this.torrent.pieces.length / 8))
+    );
 
     for (let i = 0; i < this.torrent.numPieces; i++) {
       this.torrent.pieces[i].count += this.bitField.get(i);
@@ -74,11 +76,7 @@ class Peer {
 
     if (this.state.amInterested == false) {
       const interested = messages.getInterestedMsg();
-      logger.info(
-        this.uniqueId,
-        " : Sending Interested message : ",
-        interested
-      );
+      logger.info(this.uniqueId, " : Sending Interested message : ");
       this.socket.write(interested);
     }
   };
@@ -87,30 +85,11 @@ class Peer {
     if (this.blockQueue.length > 0) {
       const requestPacket = this.blockQueue.shift();
       const requestMsg = messages.getRequestMsg(requestPacket);
-      logger.info("Requesting block to ", this.uniqueId, " : ", requestMsg);
+      // logger.warn("Requesting block to ", this.uniqueId);
       this.socket.write(requestMsg);
     } else {
       // logger.warn(this.torrent.pieces);
     }
-  };
-
-  savePiece = () => {
-    let PieceData = Buffer.alloc(0);
-    for (let i = 0; i < this.pieceBuffer.length; i++) {
-      PieceData = Buffer.concat([PieceData, this.pieceBuffer[i].block]);
-    }
-    const Piece = {
-      index: this.pieceBuffer[0].index,
-      data: PieceData,
-    };
-    if (this.verifyPiece(Piece)) {
-      logger.info("Piece with Index : ", Piece.index, " verified");
-      this.piecesDownloaded.push(Piece.index);
-    } else {
-      logger.info("Piece with Index : ", Piece.index, " Checksum mismatch");
-    }
-
-    this.torrent.pieces[Piece.index] = Piece;
   };
 
   buildBlockRequestQueue = () => {
@@ -160,16 +139,35 @@ class Peer {
     return pieceIndex;
   };
 
+  showStats = () => {
+    // const used = process.memoryUsage().heapUsed / 1024 / 1024;
+    // console.log(`memory usage : ${used} MB`);
+    const numDone = this.torrent.pieces.reduce((s, p) => {
+      if (p.state === Piece.states.COMPLETE) return s + 1;
+      return s;
+    }, 0);
+    console.log("progress: ", numDone, "total:", this.torrent.pieces.length);
+    // if (numDone === this.torrent.pieces.length - 1) {
+    //   const f = this.torrent.pieces.filter((p) => {
+    //     return p.state !== Piece.states.COMPLETE;
+    //   });
+    //   f.completedBlocks.print();
+    //   console.log(this.blockQueue);
+    // }
+  };
+
   handleMsg = () => {
     const msg = messages.parseMessage(this.buffer);
     this.buffer = this.buffer.slice(4 + this.buffer.readUInt32BE(0));
-    // logger.debug(this.uniqueId, " : ", "Received Message : ", msg);
+    // logger.debug(this.uniqueId, " : ", "Received Message : ");
 
     switch (msg.id) {
       case msgId.CHOKE:
         this.state.peerChoking = true;
         logger.debug(this.uniqueId, " : Choked us");
         // Should we end the socket
+        const interested = messages.getInterestedMsg();
+        this.socket.write(interested);
         break;
 
       case msgId.UNCHOKE:
@@ -209,6 +207,7 @@ class Peer {
         const piece = this.torrent.pieces[index];
         const pieceComplete = piece.saveBlock(begin, block);
         if (pieceComplete) {
+          this.showStats();
           this.buildBlockRequestQueue();
         }
         this.requestBlock();
