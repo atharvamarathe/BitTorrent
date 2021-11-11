@@ -10,7 +10,7 @@ logger.level = "warn";
 // logger.level = "debug";
 
 class Peer {
-  constructor(peerIp, peerPort, torrent, socket = null) {
+  constructor(peerIp, peerPort, torrent, socket, hscb) {
     this.ip = peerIp;
     this.port = peerPort;
     this.buffer = Buffer.alloc(0);
@@ -22,7 +22,7 @@ class Peer {
       amInterested: false,
     };
     this.torrent = torrent;
-    this.bitField = new BitVector(this.torrent.pieces.length);
+    this.bitField = torrent ? new BitVector(this.torrent.pieces.length) : null;
     this.piecesDownloaded = [];
     this.handshakeDone = false;
     this.msgProcessing = false;
@@ -30,7 +30,10 @@ class Peer {
     this.uploadRate = 0;
     this.pieceBuffer = [];
     this.blockQueue = [];
+    this.uploadQueue = [];
+    this.uploading = false;
     this.uniqueId = this.ip + ":" + this.port;
+    this.hscb = hscb;
   }
 
   start = () => {
@@ -45,13 +48,54 @@ class Peer {
 
       // do handshake after connecting
       this.socket.on("connect", () => {
-        let hs = messages.buildHandshakePacket(this.torrent.metadata);
+        let hs = messages.buildHandshakePacket(
+          this.torrent.metadata.infoHash,
+          this.torrent.clientId
+        );
         this.socket.write(hs);
       });
     }
     this.socket.on("error", (err) => this.onError(err));
     this.socket.on("data", (data) => this.onData(data));
     this.socket.on("end", () => this.onEnd());
+  };
+
+  send = (msg) => {
+    if (this.socket) {
+      this.socket.write(msg);
+    }
+  };
+
+  handleLeecher = (torrent) => {
+    this.torrent = torrent;
+    this.bitField = new BitVector(this.torrent.pieces.length);
+    torrent.peers.push(this);
+
+    // respond to handshake and send bitfield
+    let hs = messages.buildHandshakePacket(
+      this.torrent.metadata.infoHash,
+      this.torrent.clientId
+    );
+    this.socket.write(hs);
+    const bf = new BitVector(this.torrent.pieces.length);
+    for (let p of this.torrent.pieces) {
+      if (p.state == Piece.states.COMPLETE) bf.set(p.index);
+    }
+    let bitfield = messages.getBitFieldMsg(bf.buf);
+    this.socket.write(bitfield);
+  };
+
+  handleUploadQueue = () => {
+    if (this.uploadQueue.length > 0) {
+      const { index, begin, length } = this.uploadQueue.shift();
+      if (this.torrent.pieces[index].state === Piece.states.COMPLETE) {
+        this.torrent.pieces[index].getData(begin, length).then((data) => {
+          this.socket.write(data);
+          this.torrent.uploaded += length;
+          handleUploadQueue();
+        });
+      }
+    } else this.uploading = false;
   };
 
   isMsgComplete = () => {
@@ -172,6 +216,7 @@ class Peer {
       case msgId.INTERESTED:
         logger.debug(`Peer - ${this.uniqueId} is interested`);
         this.state.peerInterested = true;
+        this.socket.write(messages.getUnChokeMsg);
         break;
 
       case msgId.UNINTERESTED:
@@ -191,7 +236,11 @@ class Peer {
         break;
 
       case msgId.REQUEST:
-        //seeding
+        this.uploadQueue.push(msg.payload);
+        if (!this.uploading) {
+          this.uploading = true;
+          this.handleUploadQueue();
+        }
         break;
 
       case msgId.PIECE:
@@ -199,10 +248,12 @@ class Peer {
         const piece = this.torrent.pieces[index];
         const pieceComplete = piece.saveBlock(begin, block);
         if (pieceComplete) {
-          // if ENDGAME mode, cancel request for this piece from all peers
           if (this.torrent.mode === "endgame") {
             delete this.torrent.missingPieces[index];
-            for (const p of this.torrent.peers) {
+          }
+          for (const p of this.torrent.peers) {
+            if (!p.bitField.test(index)) {
+              p.send(messages.getHaveMsg(index));
             }
           }
           this.torrent.isComplete();
@@ -212,6 +263,10 @@ class Peer {
 
       case msgId.CANCEL:
         //cancel the seeding of the piece
+        const { i, b, l } = msg.payload;
+        this.uploadQueue = this.uploadQueue.filter(
+          (p) => !(p.index === i && p.begin === b && p.length === l)
+        );
         break;
 
       case msgId.PORT:
@@ -227,9 +282,13 @@ class Peer {
   };
 
   handleHandshake = () => {
-    if (this.buffer.toString("utf-8", 1, 20) == "BitTorrent protocol") {
+    const hs = messages.parseHandshake(this.buffer);
+    if (hs.pstr == "BitTorrent protocol") {
       this.handshakeDone = true;
       logger.info(`Handshake done for Peer  ${this.uniqueId}`);
+    }
+    if (this.hscb) {
+      this.hscb(hs.infoHash);
     }
     this.buffer = this.buffer.slice(this.buffer.readUInt8(0) + 49);
   };
