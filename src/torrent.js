@@ -16,12 +16,10 @@ class Torrent {
     ENDGAME: "endgame",
     COMPLETED: "completed",
   };
-  constructor(torrentFile, options = {}) {
+  constructor(torrentFile, clientId, port, options = {}) {
     this.metadata = parse_torrent(torrentFile);
-    this.clientId =
-      options.clientId || "-AMVK01-" + Math.random().toString().slice(2, 14);
-    this.metadata.peerId = this.clientId;
-    this.port = options.port || 6882;
+    this.clientId = clientId;
+    this.port = port;
     this.downloadPath = options.downloadPath || "../downloads/";
     this.upSpeed = 0;
     this.downSpeed = 0;
@@ -115,7 +113,6 @@ class Torrent {
 
   createFiles = () => {
     const dest = this.downloadPath + this.metadata.fileName;
-
     if (this.metadata.files) {
       if (!fs.existsSync(dest)) {
         fs.mkdirSync(dest, { rescursive: true });
@@ -131,14 +128,16 @@ class Torrent {
           fs.mkdirSync(filedir, { rescursive: true });
         }
         const f = new File(filepath, file.length, offset);
-        f.open();
+        f.open((err) => logger.error(err));
         this.files.push(f);
         offset += file.length;
       }
-      // this.files.forEach((f) => f.close());
     } else {
+      if (!fs.existsSync(this.downloadPath)) {
+        fs.mkdirSync(this.downloadPath, { rescursive: true });
+      }
       const f = new File(dest, this.metadata.length, 0);
-      f.open();
+      f.open((err) => logger.error(err));
       this.files.push(f);
     }
   };

@@ -28,10 +28,11 @@ class File {
             this.fd = fd;
           });
         } else return errorHandler(err);
+      } else {
+        this.fd = fd;
+        logger.warn("opened file");
+        this.busy = false;
       }
-      this.fd = fd;
-      logger.warn("opened file");
-      this.busy = false;
     });
   };
 
@@ -44,9 +45,23 @@ class File {
     });
   };
 
+  contains = (pieceStart, pieceLength) => {
+    const fileStart = this.offset;
+    const fileEnd = fileStart + this.length;
+    const pieceEnd = pieceStart + pieceLength;
+    if (pieceEnd <= fileEnd && pieceStart >= fileStart) {
+      return File.COMPLETE;
+    } else if (
+      (fileStart >= pieceStart && fileStart <= pieceEnd) ||
+      (fileEnd >= pieceStart && fileEnd <= pieceEnd)
+    ) {
+      return File.PARTIAL;
+    } else return File.NONE;
+  };
+
   read = (buffer, offset, cb) => {
     if (this.busy) {
-      return setTimeout(() => this.write(data, offset, cb), 1000);
+      return setTimeout(() => this.read(data, offset, cb), 1000);
     }
     this.busy = true;
     const { dataOffset, dataLen, position } = this.getBounds(
