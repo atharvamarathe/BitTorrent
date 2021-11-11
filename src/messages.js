@@ -12,11 +12,9 @@ const msgId = {
   KEEPALIVE: -1,
 };
 
-const buildHandshakePacket = (metaData) => {
+const buildHandshakePacket = (infoHash, peerId) => {
   const pstr = "BitTorrent protocol";
   const payload = Buffer.alloc(68);
-  const infoHash = metaData["infoHash"];
-  const peerId = metaData["peerId"];
   payload.writeUInt8(19, 0); //pstrlen
   payload.write(pstr, 1); //pstr
   payload.writeUInt32BE(0, 20); //reserved bytes
@@ -24,6 +22,23 @@ const buildHandshakePacket = (metaData) => {
   infoHash.copy(payload, 28); //infoHash
   Buffer.from(peerId).copy(payload, 48); // PeerID
   return payload;
+};
+
+const parseHandshake = (payload) => {
+  const pstrlen = payload.readInt8(0);
+  if (payload.length < 49 + pstrlen) {
+    logger.error("Inavalid Handshake Packet");
+    return {};
+  }
+  const pstr = payload.slice(1, 1 + pstrlen).toString("utf-8");
+  const infoHash = payload.slice(9 + pstrlen, 29 + pstrlen);
+  const peerId = payload.slice(29 + pstrlen);
+  return {
+    pstrlen: pstrlen,
+    pstr: pstr,
+    infoHash: infoHash,
+    peerId: peerId,
+  };
 };
 
 const getKeepAliveMsg = () => {
@@ -136,9 +151,6 @@ module.exports = {
   getRequestMsg,
   getUnChokeMsg,
   parseMessage,
+  parseHandshake,
+  msgId,
 };
-// const server = net.createServer();
-
-// const metaData = parse_torrent(filename);
-// const handshakePayload = buildHandshakePacket(metaData);
-// console.log(handshakePayload);
