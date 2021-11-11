@@ -72,6 +72,7 @@ class HttpHandler {
         .get(url, { responseType: "arraybuffer", transformResponse: [] })
         .then((res) => {
           const info = this.parseResp(res.data);
+          if (info.error) return reject(info.error);
           resolve(info);
         })
         .catch((e) => {
@@ -103,6 +104,8 @@ class HttpHandler {
 
   parseResp = (resp) => {
     const responseInfo = bencode.decode(resp);
+    if (responseInfo["failure reason"])
+      return { error: responseInfo["failure reason"].toString() };
     return {
       protocol: "http",
       interval: responseInfo.interval,
