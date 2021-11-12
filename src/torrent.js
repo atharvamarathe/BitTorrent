@@ -5,10 +5,12 @@ const Peer = require("./peer");
 const Piece = require("./piece");
 const File = require("./file");
 const Tracker = require("./tracker");
+const net = require("net");
 var log4js = require("log4js");
 var logger = log4js.getLogger();
-// logger.level = "debug";
-logger.level = "warn";
+
+logger.level = "debug";
+// logger.level = "warn";
 
 class Torrent {
   static modes = {
@@ -32,8 +34,10 @@ class Torrent {
     this.uploaded = 0;
     this.downloaded = 0;
     this.pieces = [];
+    this.trackers = [];
     // available only in EndGame mode
     this.missingPieces = {};
+    this.inputFileName = torrentFile;
   }
 
   isComplete = () => {
@@ -67,7 +71,23 @@ class Torrent {
   shutdown = () => {
     this.files.forEach((f) => f.close());
     this.peers.forEach((p) => p.disconnect());
-    process.exit(0);
+  };
+
+  saveState = () => {
+    const state = {
+      infoHash: this.metadata.infoHash,
+      pieceStates: this.pieces.map((p) => p.state === Piece.states.COMPLETE),
+      options: {
+        maxConnections: this.maxConnections,
+        uploadLimit: this.uploadLimit,
+        downloadLimit: this.downloadLimit,
+        downloadPath: this.downloadPath,
+      },
+    };
+    fs.writeFile(
+      `./.torrent-state-backups/${this.inputFileName}.json`,
+      JSON.stringify(state)
+    );
   };
 
   createPieces = () => {
@@ -101,13 +121,16 @@ class Torrent {
 
   startPeers = (info) => {
     const peerMap = new Set(this.peers.map((p) => p.uniqueId));
-    info.peerList.forEach((p) => {
-      if (!peerMap.has(p.ip + ":" + p.port)) {
-        const peer = new Peer(p.ip, p.port, this);
-        this.peers.push(peer);
-        peer.start();
+    if (info && info.peerList) {
+      for (const p of info.peerList) {
+        if (!peerMap.has(p.ip + ":" + p.port) && net.isIPv4(p.ip)) {
+          if (this.peers.length > this.maxConnections) break;
+          const peer = new Peer(p.ip, p.port, this);
+          this.peers.push(peer);
+          peer.start();
+        }
       }
-    });
+    }
     console.info("number of peers", this.peers.length);
   };
 
@@ -145,18 +168,20 @@ class Torrent {
   start = () => {
     this.createFiles();
     this.createPieces();
-    let tracker;
     if (this.metadata.announce) {
-      tracker = new Tracker(this.metadata.announce, this);
-    } else {
-      console.log(this.metadata.announceList[0]);
-      tracker = new Tracker(this.metadata.announceList[0], this);
-      // console.log(tracker);
+      this.trackers.push(new Tracker(this.metadata.announce, this));
     }
-    tracker.announce(Tracker.events.STARTED, (err, info) => {
-      if (err) logger.error(err);
-      this.startPeers(info);
-    });
+    if (this.metadata.announceList) {
+      for (const a of this.metadata.announceList) {
+        this.trackers.push(new Tracker(a, this));
+      }
+    }
+    for (const t of this.trackers) {
+      t.announce(Tracker.events.STARTED, (err, info) => {
+        this.startPeers(info);
+      });
+    }
+    setInterval(() => console.log(this.peers.length), 1000);
   };
 }
 
