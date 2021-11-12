@@ -5,9 +5,26 @@ const msgId = messages.msgId;
 const BitVector = require("./util/bitvector");
 const Piece = require("./piece");
 var log4js = require("log4js");
+const util = require("util");
+
+log4js.configure({
+  appenders: {
+    peer: {
+      type: "file",
+      filename: `./logs/peer-${new Date().toISOString()}.log`,
+
+      layout: {
+        type: "pattern",
+        pattern: "%d %l %f{1} %m",
+      },
+    },
+  },
+  categories: {
+    default: { appenders: ["peer"], level: "error", enableCallStack: true },
+  },
+});
 var logger = log4js.getLogger();
-logger.level = "warn";
-// logger.level = "debug";
+logger.level = "all";
 
 class Peer {
   constructor(peerIp, peerPort, torrent, socket, hscb) {
@@ -33,6 +50,8 @@ class Peer {
     this.uploadQueue = [];
     this.uploading = false;
     this.uniqueId = this.ip + ":" + this.port;
+    this.intervalId = null;
+    this.lastReceivedTime = null;
     this.hscb = hscb;
   }
 
@@ -58,6 +77,16 @@ class Peer {
     this.socket.on("error", (err) => this.onError(err));
     this.socket.on("data", (data) => this.onData(data));
     this.socket.on("end", () => this.onEnd());
+    // send keepalive every 2 minutes
+    this.keepaliveId = setInterval(() => {
+      this.send(messages.getKeepAliveMsg());
+      if (
+        this.lastReceivedTime &&
+        new Date().getTime() - lastReceivedTime >= 120000
+      ) {
+        this.disconnect();
+      }
+    }, 120000);
   };
 
   send = (msg) => {
@@ -246,17 +275,19 @@ class Peer {
       case msgId.PIECE:
         const { index, begin, block } = msg.payload;
         const piece = this.torrent.pieces[index];
-        const pieceComplete = piece.saveBlock(begin, block);
-        if (pieceComplete) {
-          if (this.torrent.mode === "endgame") {
-            delete this.torrent.missingPieces[index];
-          }
-          for (const p of this.torrent.peers) {
-            if (!p.bitField.test(index)) {
-              p.send(messages.getHaveMsg(index));
+        if (piece.state !== Piece.states.COMPLETE) {
+          const pieceComplete = piece.saveBlock(begin, block);
+          if (pieceComplete) {
+            if (this.torrent.mode === "endgame") {
+              delete this.torrent.missingPieces[index];
             }
+            for (const p of this.torrent.peers) {
+              if (!p.bitField.test(index)) {
+                p.send(messages.getHaveMsg(index));
+              }
+            }
+            this.torrent.isComplete();
           }
-          this.torrent.isComplete();
         }
         this.requestBlock();
         break;
@@ -294,6 +325,7 @@ class Peer {
   };
 
   onData = (data) => {
+    this.lastReceivedTime = new Date().getTime();
     this.buffer = Buffer.concat([this.buffer, data]);
     if (this.msgProcessing) return;
     this.msgProcessing = true;
@@ -317,7 +349,10 @@ class Peer {
     for (let i = 0; i < this.torrent.pieces.length; i++) {
       this.torrent.pieces[i].count -= this.bitField.get(i);
     }
-
+    this.torrent.peers = this.torrent.peers.filter(
+      (p) => p.uniqueId !== this.uniqueId
+    );
+    clearInterval(this.intervalId);
     if (this.socket) {
       this.socket.destroy();
       this.socket = null;
@@ -333,6 +368,14 @@ class Peer {
       this.disconnect("Not interested");
     }
   };
+
+  [util.inspect.custom](depth, opts) {
+    return JSON.stringify({
+      uid: this.uniqueId,
+      state: this.state,
+      bqSize: this.blockQueue.size,
+    });
+  }
 }
 
 module.exports = Peer;
