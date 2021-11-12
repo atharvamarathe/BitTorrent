@@ -3,6 +3,7 @@ const axios = require("axios").default;
 const bencode = require("bencode");
 const crypto = require("crypto");
 const logger = require("log4js").getLogger();
+const util = require("util");
 
 const CONNECTING = "connecting";
 const ERROR = "error";
@@ -40,7 +41,7 @@ class Tracker {
           }
           if (data.interval) {
             this.intervalId = setInterval(() => {
-              this.announce(event, cb);
+              this.announce(null, cb);
             }, data.interval * 1000);
           }
         } else if (event === Tracker.events.STOPPED) {
@@ -53,10 +54,17 @@ class Tracker {
       .catch((err) => {
         this.state = ERROR;
         if (event === Tracker.events.STARTED) {
-          setTimeout(() => this.announce(event, cb), 10000);
+          setTimeout(() => this.announce(null, cb), 30000);
         }
         cb(err);
       });
+  }
+
+  [util.inspect.custom](depth, opts) {
+    return JSON.stringify({
+      url: this.url,
+      state: this.state,
+    });
   }
 }
 
@@ -76,7 +84,7 @@ class HttpHandler {
           resolve(info);
         })
         .catch((e) => {
-          logger.error(e);
+          logger.error(e.code);
           reject(e);
         });
     });
@@ -90,8 +98,10 @@ class HttpHandler {
       peer_id: clientId,
       port: port,
       uploaded: uploaded,
-      downloaded: downloaded,
-      left: metadata["length"] - downloaded,
+      // downloaded: downloaded,
+      // left: metadata["length"] - downloaded,
+      downloaded: metadata["length"] / 2,
+      left: metadata["length"] / 2,
       compact: 1,
     };
     if (event) query.event = event;
@@ -136,6 +146,7 @@ class UdpHandler {
       const socket = dgram.createSocket("udp4");
       socket.on("error", (err) => {
         logger.error(err);
+        socket.close();
         return reject(err);
       });
       const payload = this.getConnectPayload();

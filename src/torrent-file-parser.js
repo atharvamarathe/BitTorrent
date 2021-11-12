@@ -21,7 +21,11 @@ getInfoHash = (rawInfo) => {
 };
 
 function getMetaData(torrentData) {
-  const announce = torrentData.announce.toString("utf-8");
+  // console.log(torrentData);
+  let announce;
+  if (torrentData.announce) {
+    announce = torrentData.announce.toString("utf-8");
+  }
   let announceList = torrentData["announce-list"];
   if (announceList) {
     announceList = announceList.reduce((res, url_list) => {
