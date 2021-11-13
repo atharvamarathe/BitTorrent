@@ -38,11 +38,15 @@ class File {
 
   close = () => {
     if (!this.fd) return;
-    fs.close(this.fd, (err) => {
-      if (err) logger.error(err);
-      this.fd = null;
-      this.busy = true;
-    });
+    if (this.busy) {
+      setTimeout(this.close, 50);
+    } else {
+      fs.close(this.fd, (err) => {
+        if (err) logger.error(err);
+        this.fd = null;
+        this.busy = true;
+      });
+    }
   };
 
   contains = (pieceStart, pieceLength) => {
@@ -70,7 +74,7 @@ class File {
     );
     fs.read(this.fd, buffer, dataOffset, dataLen, position, (err) => {
       this.busy = false;
-      if (err) return cb(err);
+      return cb(err);
     });
   };
 
@@ -79,7 +83,6 @@ class File {
       logger.warn("file busy with writing data");
       return setTimeout(() => this.write(data, offset, cb), 1000);
     }
-    console.log("writing to the file");
     this.busy = true;
     const { dataOffset, dataLen, position } = this.getBounds(
       offset,
@@ -87,9 +90,7 @@ class File {
     );
     fs.write(this.fd, data, dataOffset, dataLen, position, (err) => {
       this.busy = false;
-
-      if (err) return cb(err);
-      console.log("Finished writing");
+      return cb(err);
     });
   };
 

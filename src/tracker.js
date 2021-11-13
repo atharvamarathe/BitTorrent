@@ -4,7 +4,6 @@ const bencode = require("bencode");
 const crypto = require("crypto");
 const logger = require("log4js").getLogger();
 const util = require("util");
-
 const CONNECTING = "connecting";
 const ERROR = "error";
 const STOPPED = "stopped";
@@ -29,7 +28,6 @@ class Tracker {
   }
 
   announce(event, cb) {
-    console.log("announcing");
     this.state = CONNECTING;
     this.handler
       .connect(event)
@@ -53,12 +51,20 @@ class Tracker {
       })
       .catch((err) => {
         this.state = ERROR;
-        if (event === Tracker.events.STARTED) {
+        if (event === Tracker.events.STARTED && err != "ENOTFOUND") {
           setTimeout(() => this.announce(null, cb), 30000);
+        } else {
+          this.shutdown();
         }
         cb(err);
       });
   }
+
+  shutdown = () => {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+    }
+  };
 
   [util.inspect.custom](depth, opts) {
     return JSON.stringify({
@@ -85,7 +91,7 @@ class HttpHandler {
         })
         .catch((e) => {
           logger.error(e.code);
-          reject(e);
+          reject(e.code);
         });
     });
   };
@@ -145,9 +151,8 @@ class UdpHandler {
       const { port, hostname } = this.tracker.url;
       const socket = dgram.createSocket("udp4");
       socket.on("error", (err) => {
-        logger.error(err);
         socket.close();
-        return reject(err);
+        return reject(err.code);
       });
       const payload = this.getConnectPayload();
       socket.send(payload, port, hostname);
@@ -172,7 +177,6 @@ class UdpHandler {
 
           case udpActions.ERROR:
             err = msg.slice(8).toString();
-            logger.error(err);
             reject(err);
             break;
 
