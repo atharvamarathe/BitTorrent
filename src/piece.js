@@ -15,9 +15,10 @@ class Piece {
   };
   static BlockLength = Math.pow(2, 14);
 
-  constructor(index, len, hash, files) {
+  constructor(index, offset, len, hash, files) {
     this.hash = hash;
     this.index = index;
+    this.offset = offset;
     this.length = len;
     this.count = 0;
     this.state = Piece.states.PENDING;
@@ -53,8 +54,9 @@ class Piece {
   };
 
   writePiece = () => {
-    for (let i = 0; i < this.files.length; i++) {
-      this.files[i].write(this.data, this.index * this.length, (err) => {
+    console.log(this);
+    for (const f of this.files) {
+      f.write(this.data, this.offset, (err) => {
         if (err) logger.error(err);
         this.data = null;
         this.saved = true;
@@ -64,13 +66,13 @@ class Piece {
 
   readPiece = () => {
     return new Promise((resolve, reject) => {
-      let count = 0;
+      let c = 0;
       this.data = Buffer.alloc(this.length);
-      for (let i = 0; i < this.files.length; i++) {
-        this.files[i].read(this.data, this.index * this.length, (err) => {
+      for (const f of this.files) {
+        f.read(this.data, this.offset, (err) => {
           reject(err);
-          count += 1;
-          if (count === this.files.length) return resolve();
+          c += 1;
+          if (c === this.files.length) return resolve();
         });
       }
     });
