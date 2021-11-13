@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const Peer = require("./peer");
 const Piece = require("./piece");
+const messages = require("./messages");
 const File = require("./file");
 const Tracker = require("./tracker");
 const net = require("net");
@@ -35,6 +36,7 @@ class Torrent {
     this.downloaded = 0;
     this.pieces = [];
     this.trackers = [];
+    this.uploading = false;
     // available only in EndGame mode
     this.missingPieces = {};
     this.inputFileName = torrentFile;
@@ -49,11 +51,14 @@ class Torrent {
     }
     if (numDone === this.pieces.length) {
       console.log("completed downloading torrent");
+      // this.isDownloadComplete = true;
+      this.mode = Torrent.modes.COMPLETED;
       this.shutdown();
     }
     // start ENDGAME mode if we have requested all pieces except one
     if (
-      numDone + numActive >= this.pieces.length - 1 &&
+      numDone + numActive === this.pieces.length &&
+      numActive <= 20 &&
       this.mode !== Torrent.modes.ENDGAME
     ) {
       console.warn("endgame started");
@@ -69,8 +74,73 @@ class Torrent {
   };
 
   shutdown = () => {
-    this.files.forEach((f) => f.close());
     this.peers.forEach((p) => p.disconnect());
+    this.trackers.forEach((t) => t.shutdown());
+    const _closeFiles = () => {
+      if (this.pieces.every((p) => p.saved)) {
+        console.log("all pieces saved to file, closing the files");
+        this.files.forEach((f) => f.close());
+        // setTimeout(() => {
+        //   console.log(process._getActiveRequests());
+        //   console.log(process._getActiveHandles());
+        // }, 1000);
+      } else {
+        setTimeout(_closeFiles, 1000);
+      }
+    };
+    _closeFiles();
+  };
+
+  startSeeding = () => {
+    if (this.uploading) return;
+    this.uploading = true;
+    this.topFourIntervalId = setInterval(this.topFour, 30000);
+  };
+
+  topFour = () => {
+    // if there are 4 or less peers, unchoke all
+    if (this.peers.length <= 4) {
+      for (const p of this.peers) {
+        if (p.state.amChoking) {
+          p.state.amChoking = false;
+          p.send(messages.getUnChokeMsg());
+        }
+      }
+      return;
+    }
+    // sort in descending order with respect to download/upload speed (Upload speed is considered if
+    // download is complete) and unchoke first 4 who are interested
+    if (this.mode === Torrent.modes.COMPLETED) {
+      this.peers.sort((a, b) => b.uploadstats.rate - a.uploadstats.rate);
+    } else {
+      this.peers.sort((a, b) => b.downstats.rate - a.downstats.rate);
+    }
+    let counter = 0;
+    const interestedChoked = [];
+    for (const p of this.peers) {
+      if (counter < 4 && p.state.peerInterested) {
+        counter++;
+        if (p.state.amChoking) {
+          p.state.amChoking = false;
+          p.send(messages.getUnChokeMsg());
+        }
+      } else {
+        if (!p.state.amChoking) {
+          p.state.amChoking = true;
+          p.send(messages.getChokeMsg());
+        }
+        if (p.state.peerInterested) {
+          interestedChoked.push(p);
+        }
+      }
+    }
+    // optimistic unchoke
+    if (interestedChoked.length > 0) {
+      const opt =
+        interestedChoked[Math.floor(Math.random() * interestedChoked.length)];
+      opt.amChoking = false;
+      opt.send(messages.getUnChokeMsg());
+    }
   };
 
   saveState = () => {
@@ -109,13 +179,19 @@ class Torrent {
           break;
         }
       }
+      let len = pieceLength;
+      if (i === n - 1 && length % pieceLength !== 0) {
+        len = length % pieceLength;
+      }
       this.pieces.push(
-        new Piece(i, pieceLength, pieces.slice(i * 20, i * 20 + 20), included)
+        new Piece(
+          i,
+          i * pieceLength,
+          len,
+          pieces.slice(i * 20, i * 20 + 20),
+          included
+        )
       );
-    }
-    if (length % pieceLength !== 0) {
-      this.pieces[n - 1].length = length % pieceLength;
-      this.pieces[n - 1].data = Buffer.alloc(this.pieces[n - 1].length);
     }
   };
 
@@ -124,7 +200,7 @@ class Torrent {
     if (info && info.peerList) {
       for (const p of info.peerList) {
         if (!peerMap.has(p.ip + ":" + p.port) && net.isIPv4(p.ip)) {
-          if (this.peers.length > this.maxConnections) break;
+          if (this.peers.length >= this.maxConnections) break;
           const peer = new Peer(p.ip, p.port, this);
           this.peers.push(peer);
           peer.start();
@@ -168,6 +244,7 @@ class Torrent {
   start = () => {
     this.createFiles();
     this.createPieces();
+    // console.log(this.pieces);
     if (this.metadata.announce) {
       this.trackers.push(new Tracker(this.metadata.announce, this));
     }
@@ -181,7 +258,6 @@ class Torrent {
         this.startPeers(info);
       });
     }
-    setInterval(() => console.log(this.peers.length), 1000);
   };
 }
 
