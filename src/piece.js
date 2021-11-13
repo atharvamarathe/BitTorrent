@@ -2,16 +2,17 @@ const BitVector = require("./util/bitvector");
 const crypto = require("crypto");
 
 var log4js = require("log4js");
-var logger = log4js.getLogger();
+var logger = log4js.getLogger("piece.js");
 logger.level = "debug";
+const util = require("util");
 
 class Piece {
   static states = {
     ACTIVE: "active",
     PENDING: "pending",
     COMPLETE: "complete",
+    INCOMPLETE: "incomplete",
   };
-
   static BlockLength = Math.pow(2, 14);
 
   constructor(index, len, hash, files) {
@@ -23,10 +24,12 @@ class Piece {
     this.numBlocks = Math.ceil(this.length / Piece.BlockLength);
     this.completedBlocks = new BitVector(this.numBlocks);
     this.data = Buffer.alloc(len);
+    this.saved = false;
     this.files = files;
   }
 
   saveBlock = (begin, block) => {
+    if (this.state === Piece.states.COMPLETE) return true;
     block.copy(this.data, begin);
     this.completedBlocks.set(begin / Piece.BlockLength);
     if (this.isComplete()) {
@@ -54,6 +57,7 @@ class Piece {
       this.files[i].write(this.data, this.index * this.length, (err) => {
         if (err) logger.error(err);
         this.data = null;
+        this.saved = true;
       });
     }
   };
@@ -78,7 +82,7 @@ class Piece {
       let shasum = crypto.createHash("sha1").update(this.data).digest();
       if (!this.hash.compare(shasum)) {
         this.state = Piece.states.COMPLETE;
-        logger.warn(`piece downloaded and verified, index : ${this.index}`);
+        logger.info(`piece verified, index : ${this.index}`);
         return true;
       } else {
         this.state = Piece.states.PENDING;
@@ -88,6 +92,15 @@ class Piece {
     }
     return false;
   };
+
+  [util.inspect.custom](depth, opts) {
+    return JSON.stringify({
+      index: this.index,
+      state: this.state,
+      length: this.length,
+      progress: `${this.completedBlocks.count()}/${this.numBlocks}`,
+    });
+  }
 }
 
 module.exports = Piece;
