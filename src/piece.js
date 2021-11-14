@@ -54,7 +54,7 @@ class Piece {
   };
 
   writePiece = () => {
-    console.log(this);
+    logger.debug(this);
     for (const f of this.files) {
       f.write(this.data, this.offset, (err) => {
         if (err) logger.error(err);

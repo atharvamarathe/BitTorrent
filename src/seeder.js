@@ -19,6 +19,7 @@ class Seeder {
 
   handleConnection = (sock) => {
     const { address, port } = sock.address();
+    console.info("seeder received a connection", address);
     const peer = new Peer(address, port, null, sock, (infoHash) => {
       const torrent = this.client.torrents[infoHash];
       if (!torrent) {

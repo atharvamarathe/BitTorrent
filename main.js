@@ -1,10 +1,5 @@
 const Client = require("./src/client.js");
-const Torrent = require("./src/torrent.js");
 const _progress = require("cli-progress");
-// const readline = require("readline").createInterface({
-//   input: process.stdin,
-//   output: process.stdout,
-// });
 const { ArgumentParser } = require("argparse");
 
 const getParser = () => {
@@ -52,18 +47,37 @@ function main() {
       maxConnections: args.max_connections,
     };
     const torrent = client.addTorrent(f, options);
-    const progressBar = new _progress.Bar({}, _progress.Presets.shades_classic);
-    progressBar.start(torrent.numPieces, 0);
+    const progressBar = new _progress.SingleBar(
+      {
+        format:
+          "\x1b[35mTorrent Progress\x1b[32m {bar} \x1b[31m{percentage}% | \x1b[36mETA: {eta}s |\x1b[33m {value}/{total}" +
+          " \x1b[37mSpeed: {Speed}",
+      },
+      _progress.Presets.shades_classic
+    );
+    progressBar.start(torrent.numPieces, 0, { Speed: "N/A" });
+    let numDone = 0;
     torrent.start((event, data) => {
       if (event === "progress") {
         progressBar.update(data.numDone);
+        numDone = data.numDone;
       }
       if (event === "saved") {
         progressBar.stop();
+        client.closeSeeder();
       }
       if (event === "rate-update") {
-        const downSpeed = data.downSpeed;
-        const upSpeed = data.upSpeed;
+        // console.log(data);
+        const downSpeed = Math.floor(data.downSpeed / 1024);
+        if (downSpeed < 1000) {
+          progressBar.update(numDone, {
+            Speed: Math.floor(downSpeed / 1024) + "Kb/s",
+          });
+        } else {
+          progressBar.update(numDone, {
+            Speed: Math.floor(downSpeed / 1024) + "Mb/s",
+          });
+        }
       }
     });
     torrents.push(torrent);

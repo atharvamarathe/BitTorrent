@@ -104,10 +104,8 @@ class HttpHandler {
       peer_id: clientId,
       port: port,
       uploaded: uploaded,
-      // downloaded: downloaded,
-      // left: metadata["length"] - downloaded,
-      downloaded: metadata["length"] / 2,
-      left: metadata["length"] / 2,
+      downloaded: downloaded,
+      left: metadata["length"] - downloaded,
       compact: 1,
     };
     if (event) query.event = event;

@@ -11,6 +11,11 @@ class Client {
     this.seeder = new Seeder(this.port, this);
   }
 
+  closeSeeder = () => {
+    this.seeder.server.close();
+    this.seeder = null;
+  };
+
   addTorrent = (filename, options) => {
     const t = new Torrent(filename, this.clientId, this.port, options);
     if (!this.torrents[t.metadata.infoHash]) {
