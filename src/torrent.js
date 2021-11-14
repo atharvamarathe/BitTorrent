@@ -107,8 +107,34 @@ class Torrent {
     }
     this.downSpeed = downSpeed;
     this.upSpeed = upSpeed;
-    this.limitSpeed();
+    this.limitDownloadSpeed();
+    if (this.uploading) this.limitUploadSpeed();
     this.cb("rate-update", { downSpeed, upSpeed });
+  };
+
+  limitDownloadSpeed = () => {
+    if (!(this.downloadLimit && this.downSpeed > this.downloadLimit)) return;
+    let rate = this.downSpeed;
+    this.peers.sort((a, b) => b.downstats.rate - a.downstats.rate);
+    let i = this.peers.length - 1;
+    while (rate > this.downloadLimit && i >= 0) {
+      rate -= this.peers[i].downstats.rate;
+      this.peers[i].downthrottle = true;
+      i--;
+    }
+  };
+
+  limitUploadSpeed = () => {
+    if (!(this.uploadLimit && this.upSpeed > this.uploadLimit)) return;
+    let rate = this.upSpeed;
+    const receivers = this.peers
+      .filter((p) => !p.amChoking)
+      .sort((a, b) => b.upstats.rate - a.upstats.rate);
+    while (rate > this.uploadLimit && receivers.length) {
+      const p = receivers.pop();
+      rate -= p.upstats.rate;
+      p.upthrottle = true;
+    }
   };
 
   startSeeding = () => {
@@ -162,8 +188,6 @@ class Torrent {
       opt.send(messages.getUnChokeMsg());
     }
   };
-
-  limitSpeed = () => {};
 
   saveState = () => {
     const state = {
