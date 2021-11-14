@@ -85,10 +85,9 @@ class Peer {
     // send keepalive every 2 minutes
     this.intervalId = setInterval(() => {
       this.send(messages.getKeepAliveMsg());
-      this.updateDownRate();
       if (new Date().getTime() - this.lastReceivedTime >= 100000) {
-        console.log("disconnecting");
         if (
+          this.currPieceIndex != -1 &&
           this.torrent.pieces[this.currPieceIndex].state === Piece.states.ACTIVE
         ) {
           this.torrent.pieces[this.currPieceIndex].state =
@@ -131,6 +130,8 @@ class Peer {
         this.torrent.pieces[index].getData(begin, length).then((data) => {
           this.socket.write(data);
           this.torrent.uploaded += length;
+          this.upstats.numbytes += length;
+          this.updateUploadRate();
           handleUploadQueue();
         });
       }
@@ -166,7 +167,6 @@ class Peer {
     let pieceIndex = -1;
     if (this.torrent.mode === "endgame") {
       let missing = [];
-      console.log(this.torrent.missingPieces);
       for (const m in this.torrent.missingPieces) {
         const ind = parseInt(m, 10);
         if (this.bitField.test(ind)) missing.push(ind);
@@ -239,7 +239,7 @@ class Peer {
       case msgId.UNCHOKE:
         this.state.peerChoking = false;
         logger.debug(`Peer - ${this.uniqueId} unchoked us`);
-        this.updateDownRate();
+        this.updateDownloadRate();
         this.requestPiece();
         break;
 
@@ -280,7 +280,8 @@ class Peer {
           const pieceComplete = piece.saveBlock(begin, block);
           if (pieceComplete) {
             this.downstats.numbytes += piece.length;
-            this.updateDownRate();
+            this.torrent.downloaded += piece.length;
+            this.updateDownloadRate();
             if (this.torrent.mode === "endgame") {
               delete this.torrent.missingPieces[index];
             }
@@ -290,7 +291,7 @@ class Peer {
               }
             }
             this.requestPiece();
-            this.torrent.isComplete();
+            this.torrent.updateState();
           }
         }
         break;
@@ -315,7 +316,7 @@ class Peer {
     }
   };
 
-  updateDownRate = () => {
+  updateDownloadRate = () => {
     // length in bytes, t in s, rate in bps
     const history = this.downstats.history;
     history.push({
@@ -327,11 +328,22 @@ class Peer {
     if (t === 0) return;
     const n = this.downstats.numbytes - history[0].numbytes;
     this.downstats.rate = n / t;
-    if (this.downstats.rate > 500000) {
-      console.log(this.downstats, t, n);
+    while (currtime - history[0].time > 1000) {
+      history.shift();
     }
-    // console.log(Math.ceil(this.downstats.rate / 1024), " kbps");
-    // console.log(this.downstats);
+  };
+
+  updateUploadRate = () => {
+    const history = this.upstats.history;
+    history.push({
+      time: new Date().getTime(),
+      numbytes: this.upstats.numbytes,
+    });
+    const currtime = new Date().getTime();
+    const t = (currtime - history[0].time) / 1000; //time in sec
+    if (t === 0) return;
+    const n = this.upstats.numbytes - history[0].numbytes;
+    this.upstats.rate = n / t;
     while (currtime - history[0].time > 1000) {
       history.shift();
     }
@@ -368,7 +380,7 @@ class Peer {
   };
 
   disconnect = (msg, reconnectionTimeOut) => {
-    console.log(`peer disconnected ${this.uniqueId} with message ${msg}`);
+    logger.info(`peer disconnected ${this.uniqueId} with message ${msg}`);
     this.disconnected = true;
 
     for (let i = 0; i < this.torrent.pieces.length; i++) {
@@ -377,7 +389,6 @@ class Peer {
     this.torrent.peers = this.torrent.peers.filter(
       (p) => p.uniqueId !== this.uniqueId
     );
-    console.log("disconnecting");
     if (this.intervalId) {
       clearInterval(this.intervalId);
     }
