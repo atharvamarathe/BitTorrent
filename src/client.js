@@ -15,8 +15,6 @@ class Client {
     const t = new Torrent(filename, this.clientId, this.port, options);
     if (!this.torrents[t.metadata.infoHash]) {
       this.torrents[t.metadata.infoHash] = t;
-      t.start();
-      logger.info("new Torrent added and started: ", t.metadata.infoHash);
     }
     return t;
   };

@@ -40,28 +40,33 @@ class Torrent {
     // available only in EndGame mode
     this.missingPieces = {};
     this.inputFileName = torrentFile;
+    this.cb = null; // callback function that takes event and payload
   }
 
-  isComplete = () => {
+  get numPieces() {
+    return this.metadata.pieces.length / 20;
+  }
+
+  updateState = () => {
     let numDone = 0;
     let numActive = 0;
     for (const p of this.pieces) {
       if (p.state === Piece.states.COMPLETE) numDone++;
       else if (p.state === Piece.states.ACTIVE) numActive++;
     }
+    this.cb("progress", { numDone });
     if (numDone === this.pieces.length) {
-      console.log("completed downloading torrent");
-      // this.isDownloadComplete = true;
       this.mode = Torrent.modes.COMPLETED;
+      this.cb("completed");
       this.shutdown();
     }
     // start ENDGAME mode if we have requested all pieces except one
-    if (
+    else if (
       numDone + numActive === this.pieces.length &&
       numActive <= 20 &&
-      this.mode !== Torrent.modes.ENDGAME
+      this.mode === Torrent.modes.DEFAULT
     ) {
-      console.warn("endgame started");
+      logger.warn("endgame started");
       this.mode = Torrent.modes.ENDGAME;
       const missing = this.pieces.filter(
         (p) => p.state !== Piece.states.COMPLETE
@@ -70,25 +75,40 @@ class Torrent {
         this.missingPieces[m.index] = m;
       }
     }
-    console.log("progress: ", numDone, "/", this.pieces.length);
+    // console.log("progress: ", numDone, "/", this.pieces.length);
   };
 
   shutdown = () => {
     this.peers.forEach((p) => p.disconnect());
     this.trackers.forEach((t) => t.shutdown());
+    clearInterval(this.rateIntervalid);
+    // if(t)
     const _closeFiles = () => {
       if (this.pieces.every((p) => p.saved)) {
-        console.log("all pieces saved to file, closing the files");
         this.files.forEach((f) => f.close());
-        // setTimeout(() => {
-        //   console.log(process._getActiveRequests());
-        //   console.log(process._getActiveHandles());
-        // }, 1000);
+        this.cb("saved");
       } else {
         setTimeout(_closeFiles, 1000);
       }
     };
     _closeFiles();
+  };
+
+  updateRates = () => {
+    let downSpeed = 0;
+    let upSpeed = 0;
+    for (const p of this.peers) {
+      p.updateDownloadRate();
+      downSpeed += p.downstats.rate;
+      if (this.uploading) {
+        this.updateUploadRate();
+        upSpeed += p.upstats.rate;
+      }
+    }
+    this.downSpeed = downSpeed;
+    this.upSpeed = upSpeed;
+    this.limitSpeed();
+    this.cb("rate-update", { downSpeed, upSpeed });
   };
 
   startSeeding = () => {
@@ -142,6 +162,8 @@ class Torrent {
       opt.send(messages.getUnChokeMsg());
     }
   };
+
+  limitSpeed = () => {};
 
   saveState = () => {
     const state = {
@@ -207,7 +229,6 @@ class Torrent {
         }
       }
     }
-    console.info("number of peers", this.peers.length);
   };
 
   createFiles = () => {
@@ -241,7 +262,8 @@ class Torrent {
     }
   };
 
-  start = () => {
+  start = (cb) => {
+    this.cb = cb;
     this.createFiles();
     this.createPieces();
     // console.log(this.pieces);
@@ -258,6 +280,7 @@ class Torrent {
         this.startPeers(info);
       });
     }
+    this.rateIntervalid = setInterval(this.updateRates, 1000);
   };
 }
 
