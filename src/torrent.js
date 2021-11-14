@@ -41,6 +41,12 @@ class Torrent {
     this.missingPieces = {};
     this.inputFileName = torrentFile;
     this.cb = null; // callback function that takes event and payload
+
+    this.downLimitFactor = 0;
+    this.upLimitFactor = 0;
+    //last recorded data {t: time, n: downloaded/uploaded}
+    this.lastDownRecord = null;
+    this.lastUpRecord = null;
   }
 
   get numPieces() {
@@ -107,13 +113,26 @@ class Torrent {
     }
     this.downSpeed = downSpeed;
     this.upSpeed = upSpeed;
-    this.limitDownloadSpeed();
-    if (this.uploading) this.limitUploadSpeed();
+    // this.limitDownloadSpeed();
+    // if (this.uploading) this.limitUploadSpeed();
     this.cb("rate-update", { downSpeed, upSpeed });
+    this.cb("peers", { peers: this.peers.length });
   };
 
   limitDownloadSpeed = () => {
-    if (!(this.downloadLimit && this.downSpeed > this.downloadLimit)) return;
+    if (!(this.downloadLimit && this.downSpeed > this.downloadLimit)) {
+      this.downLimitFactor = 0;
+      return;
+    }
+
+    const { n, t } = this.lastDownRecord;
+    const currtime = new Date().getTime();
+    const expectedDelta = (this.downloaded - n) / this.downloadLimit;
+    const actualDelta = currtime - t;
+    this.downLimitFactor = (expectedDelta - actualDelta) / actualDelta;
+    this.lastDownRecord = { t: currtime, n: this.downloaded };
+
+    //throttle specific peers
     let rate = this.downSpeed;
     this.peers.sort((a, b) => b.downstats.rate - a.downstats.rate);
     let i = this.peers.length - 1;
@@ -125,7 +144,17 @@ class Torrent {
   };
 
   limitUploadSpeed = () => {
-    if (!(this.uploadLimit && this.upSpeed > this.uploadLimit)) return;
+    if (!(this.uploadLimit && this.upSpeed > this.uploadLimit)) {
+      this.upLimitFactor = 0;
+      return;
+    }
+    const { n, t } = this.lastUpRecord;
+    const expectedDelta = (this.uploaded - n) / this.uploadLimit;
+    const actualDelta = currtime - t;
+    this.upLimitFactor = (expectedDelta - actualDelta) / actualDelta;
+    this.lastUpRecord = { t: currtime, n: this.uploaded };
+
+    //throttle specific peers
     let rate = this.upSpeed;
     const receivers = this.peers
       .filter((p) => !p.amChoking)
@@ -304,6 +333,14 @@ class Torrent {
         this.startPeers(info);
       });
     }
+    this.lastDownRecord = {
+      t: new Date().getTime(),
+      n: 0,
+    };
+    this.lastUpRecord = {
+      t: new Date().getTime(),
+      n: 0,
+    };
     this.rateIntervalid = setInterval(this.updateRates, 1000);
   };
 }
