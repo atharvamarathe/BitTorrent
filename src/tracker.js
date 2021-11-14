@@ -174,7 +174,7 @@ class UdpHandler {
             break;
 
           case udpActions.ERROR:
-            err = msg.slice(8).toString();
+            const err = msg.slice(8).toString();
             reject(err);
             break;
 
