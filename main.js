@@ -50,12 +50,12 @@ function main() {
     const progressBar = new _progress.SingleBar(
       {
         format:
-          "\x1b[35mTorrent Progress\x1b[32m {bar} \x1b[31m{percentage}% | \x1b[36mETA: {eta}s |\x1b[33m {value}/{total}" +
-          " \x1b[37mSpeed: {Speed}",
+          "\x1b[40m\x1b[35mTorrent Progress\x1b[32m {bar} \x1b[31m{percentage}% | \x1b[36mETA: {eta}s |\x1b[33m {value}/{total}" +
+          " \x1b[37mSpeed: {Speed} | \x1b[33m Peers: {peers}",
       },
       _progress.Presets.shades_classic
     );
-    progressBar.start(torrent.numPieces, 0, { Speed: "N/A" });
+    progressBar.start(torrent.numPieces, 0, { Speed: "N/A", peers: 0 });
     let numDone = 0;
     torrent.start((event, data) => {
       if (event === "progress") {
@@ -66,12 +66,14 @@ function main() {
         progressBar.stop();
         client.closeSeeder();
       }
+      if (event === "peers") {
+        progressBar.update(numDone, { peers: data.peers });
+      }
       if (event === "rate-update") {
-        // console.log(data);
         const downSpeed = Math.floor(data.downSpeed / 1024);
         if (downSpeed < 1000) {
           progressBar.update(numDone, {
-            Speed: Math.floor(downSpeed / 1024) + "Kb/s",
+            Speed: Math.floor(downSpeed) + "Kb/s",
           });
         } else {
           progressBar.update(numDone, {
