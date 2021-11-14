@@ -64,6 +64,3 @@ const parse_torrent = (filename) => {
 };
 
 module.exports = parse_torrent;
-
-// const filename = "./demoTorrentFiles/ubuntu-20.04.3-live-server-amd64.iso.torrent";
-// let metaData = parse_torrent(filename);

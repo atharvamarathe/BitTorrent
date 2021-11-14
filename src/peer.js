@@ -164,6 +164,12 @@ class Peer {
   };
 
   requestPiece = () => {
+    // if (
+    //   this.torrent.downLimitFactor !== 0 &&
+    //   Math.random() < this.torrent.downLimitFactor
+    // ) {
+    //   setTimeout(this.requestPiece, 100);
+    // }
     let pieceIndex = -1;
     if (this.torrent.mode === "endgame") {
       let missing = [];
@@ -231,7 +237,6 @@ class Peer {
       case msgId.CHOKE:
         this.state.peerChoking = true;
         logger.debug(this.uniqueId, " : Choked us");
-        // Should we end the socket
         const interested = messages.getInterestedMsg();
         this.socket.write(interested);
         break;

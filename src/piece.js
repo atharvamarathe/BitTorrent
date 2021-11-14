@@ -80,7 +80,6 @@ class Piece {
 
   isComplete = () => {
     if (this.completedBlocks.count() === this.numBlocks) {
-      //   console.debug("got all pieces for piece : ", this.index);
       let shasum = crypto.createHash("sha1").update(this.data).digest();
       if (!this.hash.compare(shasum)) {
         this.state = Piece.states.COMPLETE;
